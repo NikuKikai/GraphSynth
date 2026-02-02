@@ -1,10 +1,9 @@
 import enum
+from typing import Union
 import numpy as np
 import time
 import pygame
 import sounddevice as sd
-
-from functools import cache
 
 
 class NoteSignal:
@@ -13,7 +12,8 @@ class NoteSignal:
         self.inited_t = time.time()
         self.current_ts = np.array(0.0)
         self.released = False
-        self.released_t = 0.0
+        self.released_t = -1.0
+        self._eval_cache = {}  # cache for one-time evaluation
 
 
 class Port:
@@ -68,20 +68,29 @@ class Module:
             self._create_outport(op_name)
 
     def __call__(self, signal: NoteSignal, **kwargs):
+        signal._eval_cache.clear()
         return self._call(signal, self, **kwargs)
 
-    @cache
     def _call(self, signal: NoteSignal, root: 'Module', **kwargs):
+        # cache
+        cache_key = (id(self), id(root))
+        if cache_key in signal._eval_cache:
+            return signal._eval_cache[cache_key]
+
         if self._primitive:
             ipargs = dict()
             for ip in self._inports:
                 ipargs[ip.name] = ip._eval(signal, root, **kwargs)
-            return self._proc(signal, **ipargs)
+            result = self._proc(signal, **ipargs)
+        else:
+            res = dict()
+            for op in self._outports:
+                res[op.name] = op.source._eval(signal, root, **kwargs)
+            result = res
 
-        res = dict()
-        for op in self._outports:
-            res[op.name] = op.source._eval(signal, root, **kwargs)
-        return res
+        # cache
+        signal._eval_cache[cache_key] = result
+        return result
 
     def _proc(self, signal: NoteSignal, **kwargs):
         res = dict()
@@ -193,9 +202,11 @@ class Envelope(Module):
 class Controller:
     def __init__(self, time_to_keep_after_release=0.5):
         self.t_keep = time_to_keep_after_release
-        self.signals = dict()  # freq -> NoteSignal
+        self.signals: dict[float, NoteSignal] = dict()
 
-    def press(self, freq: float, release_after: float = None):
+    def press(self, freq: Union[float, str], release_after: float = 0.5):
+        if isinstance(freq, str):
+            freq = note_str2freq(freq)
         s = NoteSignal(freq=freq)
         self.signals[freq] = s
         if release_after is not None:
@@ -210,23 +221,36 @@ class Controller:
         now = time.time()
         to_delete = []
         for freq, signal in self.signals.items():
-            if signal.released_t > now:
+            if signal.released_t < 0.0:
+                continue
+            if signal.released_t < now:
                 signal.released = True
             if now - signal.released_t > self.t_keep:
                 to_delete.append(freq)
         for freq in to_delete:
             del self.signals[freq]
 
-    def get_active_signals(self, blocksize: int):
+    def get_active_signals(self, blocksize: int, t: float = None) -> list[NoteSignal]:
         res = list(self.signals.values())
+        t = t if t is not None else time.time()
         for sig in res:
-            sig.current_ts = np.array([time.time()]) + np.arange(blocksize) * (1.0 / 44100.0)
+            sig.current_ts = np.array([t]) + np.arange(blocksize) * (1.0 / 44100.0)
         return res
+
+
+def note_str2freq(note: str) -> float:
+    A4_FREQ = 440.0
+    NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    octave = int(note[-1])
+    key = note[:-1]
+    n = NOTE_NAMES.index(key)
+    semitones_from_A4 = n - 9 + (octave - 4) * 12
+    return A4_FREQ * (2 ** (semitones_from_A4 / 12))
 
 
 # ------ Define synth structure ------
 mod = Module(inports={}, outports=['out'])
-osc = OSC(OSC.WAVETYPE.SINE)
+osc = OSC(OSC.WAVETYPE.SAWTOOTH)
 gain = GainModule()
 # env = Envelope(attack=0.05, decay=0.1, sustain=0.6, release=0.3).to(outnode)
 # env.to(osc.arg1)
@@ -239,15 +263,20 @@ gain.out.to(mod.out)
 controller = Controller(time_to_keep_after_release=0.1)
 
 
+# ------ Audio callback ------
+print(sd.query_devices(sd.default.device[1]))
+
+
 def callback(indata, outdata, frames, t, status):  # 240/44100 seconds per frame
-    signals = controller.get_active_signals(blocksize=frames)
+    signals = controller.get_active_signals(blocksize=frames, t=t.outputBufferDacTime)
     if len(signals) == 0:
-        print("No active signals")
         outdata.fill(0.0)
         return
-    
+
     res = 0
     for signal in signals:
+        # print(frames)
+        # print('latency:', t.outputBufferDacTime - t.currentTime)
         res = res + mod(signal)['out']
 
     outdata[:, 0] = res
@@ -257,11 +286,10 @@ if __name__ == "__main__":
     pygame.init()
     screen = pygame.display.set_mode((400, 300))
 
-    sd.Stream(callback=callback, samplerate=44100, channels=1, blocksize=240).start()
+    sd.Stream(callback=callback, samplerate=44100, channels=1, blocksize=0, latency=0.05).start()
 
     while True:
-        # time.sleep(1.0 / 60.0)
-        screen.fill((0,0,0))
+        screen.fill((0, 0, 0))
         pygame.display.update()
         controller.update()
 
@@ -270,14 +298,30 @@ if __name__ == "__main__":
                 pygame.quit()
                 exit()
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    exit()
                 if event.key == pygame.K_a:
-                    controller.press(440.0, release_after=0.5)  # A4
-                if event.key == pygame.K_w:
-                    controller.press(466.16, release_after=0.5) # A#4
+                    controller.press('C4')
                 if event.key == pygame.K_s:
-                    controller.press(493.88, release_after=0.5)  # B4
+                    controller.press('C#4')
                 if event.key == pygame.K_d:
-                    controller.press(523.25, release_after=0.5)  # C5
-                if event.key == pygame.K_r:
-                    controller.press(554.37, release_after=0.5)  # C#5
-
+                    controller.press('D4')
+                if event.key == pygame.K_f:
+                    controller.press('D#4')
+                if event.key == pygame.K_g:
+                    controller.press('E4')
+                if event.key == pygame.K_h:
+                    controller.press('F4')
+                if event.key == pygame.K_j:
+                    controller.press('F#4')
+                if event.key == pygame.K_k:
+                    controller.press('G4')
+                if event.key == pygame.K_l:
+                    controller.press('G#4')
+                if event.key == pygame.K_SEMICOLON:
+                    controller.press('A4')
+                if event.key == pygame.K_QUOTE:
+                    controller.press('A#4')
+                if event.key == pygame.K_RETURN:
+                    controller.press('B4')
