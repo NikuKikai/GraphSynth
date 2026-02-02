@@ -1,7 +1,7 @@
 import enum
 import numpy as np
 import time
-# import sprechstimme as sp
+import pygame
 import sounddevice as sd
 
 from functools import cache
@@ -196,20 +196,24 @@ class Controller:
         self.signals = dict()  # freq -> NoteSignal
 
     def press(self, freq: float, release_after: float = None):
-        if freq not in self.signals:
-            self.signals[freq] = NoteSignal(freq=freq)
+        s = NoteSignal(freq=freq)
+        self.signals[freq] = s
+        if release_after is not None:
+            s.released_t = s.inited_t + release_after
 
     def release(self, freq: float):
-        if freq in self.signals:
+        if freq in self.signals and self.signals[freq].released is False:
             self.signals[freq].released = True
             self.signals[freq].released_t = time.time()
 
     def update(self):
+        now = time.time()
         to_delete = []
         for freq, signal in self.signals.items():
-            if signal.released:
-                if time.time() - signal.released_t > self.t_keep:
-                    to_delete.append(freq)
+            if signal.released_t > now:
+                signal.released = True
+            if now - signal.released_t > self.t_keep:
+                to_delete.append(freq)
         for freq in to_delete:
             del self.signals[freq]
 
@@ -232,17 +236,48 @@ osc.out.to(gain.inp)
 gain.gain.default = 0.05
 gain.out.to(mod.out)
 
-signal = NoteSignal(freq=440.0)
+controller = Controller(time_to_keep_after_release=0.1)
 
 
 def callback(indata, outdata, frames, t, status):  # 240/44100 seconds per frame
-    signal.current_ts = np.array([time.time()]) + np.arange(240) * (1.0 / 44100.0)
-    res = mod(signal)
-    outdata[:, 0] = res['out']
+    signals = controller.get_active_signals(blocksize=frames)
+    if len(signals) == 0:
+        print("No active signals")
+        outdata.fill(0.0)
+        return
+    
+    res = 0
+    for signal in signals:
+        res = res + mod(signal)['out']
+
+    outdata[:, 0] = res
 
 
-sd.Stream(callback=callback, samplerate=44100, channels=1, blocksize=240).start()
+if __name__ == "__main__":
+    pygame.init()
+    screen = pygame.display.set_mode((400, 300))
 
+    sd.Stream(callback=callback, samplerate=44100, channels=1, blocksize=240).start()
 
-while True:  # 60fps
-    time.sleep(1.0 / 60.0)
+    while True:
+        # time.sleep(1.0 / 60.0)
+        screen.fill((0,0,0))
+        pygame.display.update()
+        controller.update()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_a:
+                    controller.press(440.0, release_after=0.5)  # A4
+                if event.key == pygame.K_w:
+                    controller.press(466.16, release_after=0.5) # A#4
+                if event.key == pygame.K_s:
+                    controller.press(493.88, release_after=0.5)  # B4
+                if event.key == pygame.K_d:
+                    controller.press(523.25, release_after=0.5)  # C5
+                if event.key == pygame.K_r:
+                    controller.press(554.37, release_after=0.5)  # C#5
+
