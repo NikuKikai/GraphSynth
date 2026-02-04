@@ -5,7 +5,7 @@ A simple graph-style python framework for audio synthesizer.
 
 ```python
 import numpy as np
-from graphsynth.modules import OSC, Gain, Container, Envelope
+from graphsynth.modules import OSC, Gain, Container, Envelope, LowPass
 
 # Create modules
 mod = Container()  # Outer module to contain others
