@@ -45,3 +45,8 @@ osc.to(env).to(gain).to(filter).to(mod.out)  # last one should be 'mod.out' sinc
 #### `play_keyboard.py`
 
 Play with your keyboard like a piano. Require `pygame`.
+
+
+## Acknowledge
+
+- Thanks to [Sprechstimme](https://github.com/Sprechstimme-lib/Sprechstimme/tree/main) as reference on mathematical implementation.
