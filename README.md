@@ -37,3 +37,11 @@ osc.to(env).to(gain).to(filter).to(mod.out)  # last one should be 'mod.out' sinc
 - Module can contain multiple input ports and output ports.
 - Modules are connected through ports, using `to` method.
     - If modules have single inport/outport, you can directly use Module's `to` method.
+
+## Examples
+
+> Located under `\examples\`.
+
+#### `play_keyboard.py`
+
+Play with your keyboard like a piano. Require `pygame`.
