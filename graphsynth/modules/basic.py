@@ -1,13 +1,13 @@
 import enum
 import numpy as np
-from .core import NoteSignal, Module
+from ..core import NoteSignal, Module
 
 
 class Container(Module):
     def __init__(self):
         super().__init__()
         self._primitive = False
-        self.out = self._create_outport('out')
+        self.out = self._create_outport('out', is_audio=True)
 
 
 @Module.wrap_func(inports={'inp': 0.0}, outports=['out'])
@@ -20,15 +20,16 @@ def PassThru(signal: NoteSignal, inp=0.0):
 #     return {'out': inp * gain}
 
 class Gain(Module):
-    def __init__(self, gain=0.2):
+    def __init__(self, gain=0.0):
         super().__init__()
         self._primitive = True
-        self.inp = self._create_inport('inp', default=0.0)
+        self.inp = self._create_inport('inp', default=0.0, is_audio=True)
         self.gain = self._create_inport('gain', default=gain)
-        self.out = self._create_outport('out')
+        self.out = self._create_outport('out', is_audio=True)
 
-    def _proc(self, signal: NoteSignal, inp=0.0, gain=1.0) -> dict:
-        return {'out': inp * gain}
+    def _proc(self, signal: NoteSignal, inp=0.0, gain=0.0) -> dict:
+        a = np.power(10.0, gain / 20.0)
+        return {'out': inp * a}
 
 
 class OSC(Module):
@@ -42,7 +43,7 @@ class OSC(Module):
         super().__init__()
         self._primitive = True
         self.wavetype = wavetype
-        self.out = self._create_outport('out')
+        self.out = self._create_outport('out', is_audio=True)
 
     def _sine(self, signal: NoteSignal):
         ts = signal.local_ts
@@ -77,21 +78,21 @@ class Envelope(Module):
     def __init__(self, attack=0.01, decay=0.1, sustain=0.7, release=0.2):
         super().__init__()
         self._primitive = True
-        self.inp = self._create_inport('inp', default=0.0)
+        self.inp = self._create_inport('inp', default=1.0, is_audio=True)
         self.attack = self._create_inport('attack', default=attack)
         self.decay = self._create_inport('decay', default=decay)
         self.sustain = self._create_inport('sustain', default=sustain)
         self.release = self._create_inport('release', default=release)
-        self.out = self._create_outport('out')
+        self.out = self._create_outport('out', is_audio=True)
 
     def _proc(
         self,
         signal: NoteSignal,
         inp: np.ndarray = 0.0,
-        attack: float = 0.01,
-        decay: float = 0.1,
-        sustain: float = 0.7,
-        release: float = 0.2
+        attack: np.ndarray = 0.01,
+        decay: np.ndarray = 0.1,
+        sustain: np.ndarray = 0.7,
+        release: np.ndarray = 0.2
     ) -> dict:
         ts = np.clip(signal.local_ts, 0, None)
         rls = signal.local_released_t

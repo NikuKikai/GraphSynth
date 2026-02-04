@@ -1,3 +1,4 @@
+from typing import Union
 import numpy as np
 import time
 
@@ -9,7 +10,8 @@ class NoteSignal:
         self.released_t_sys = -1.0
         self.inited_t = -1.0
         self.current_ts = np.array(0.0)
-        self._eval_cache = {}  # cache for one-time evaluation
+        self._cache = {}  # cache for one-time evaluation
+        self._states = {}  # storage for module states
 
     @property
     def local_ts(self):
@@ -21,9 +23,10 @@ class NoteSignal:
 
 
 class Port:
-    def __init__(self, name: str, parent: 'Module'):
+    def __init__(self, name: str, parent: 'Module', is_audio=False):
         self.name = name
         self.parent = parent
+        self.is_audio = is_audio
 
     def to(self, target: 'Port'):
         if target.source is not None:
@@ -33,8 +36,8 @@ class Port:
 
 
 class InPort(Port):
-    def __init__(self, name: str, parent: 'Module', default=0.0):
-        super().__init__(name, parent)
+    def __init__(self, name: str, parent: 'Module', default=0.0, is_audio=False):
+        super().__init__(name, parent, is_audio=is_audio)
         self.default = default
         self.source: Port = None
 
@@ -47,8 +50,8 @@ class InPort(Port):
 
 
 class OutPort(Port):
-    def __init__(self, name: str, parent: 'Module'):
-        super().__init__(name, parent)
+    def __init__(self, name: str, parent: 'Module', is_audio=False):
+        super().__init__(name, parent, is_audio=is_audio)
         self.source: Port = None
 
     def _eval(self, signal: NoteSignal, root: 'Module', **kwargs):
@@ -70,14 +73,14 @@ class Module:
             self._create_outport(op_name)
 
     def __call__(self, signal: NoteSignal, **kwargs):
-        signal._eval_cache.clear()
+        signal._cache.clear()
         return self._call(signal, self, **kwargs)
 
     def _call(self, signal: NoteSignal, root: 'Module', **kwargs):
         # cache
         cache_key = (id(self), id(root))
-        if cache_key in signal._eval_cache:
-            return signal._eval_cache[cache_key]
+        if cache_key in signal._cache:
+            return signal._cache[cache_key]
 
         if self._primitive:
             ipargs = dict()
@@ -90,7 +93,7 @@ class Module:
                 result[op.name] = op.source._eval(signal, root, **kwargs)
 
         # cache
-        signal._eval_cache[cache_key] = result
+        signal._cache[cache_key] = result
         return result
 
     def _proc(self, signal: NoteSignal, **kwargs):
@@ -99,14 +102,14 @@ class Module:
             res[op.name] = 0.0
         return res
 
-    def _create_inport(self, name: str, default=0.0) -> InPort:
-        ip = InPort(name, self, default)
+    def _create_inport(self, name: str, default=0.0, is_audio=False) -> InPort:
+        ip = InPort(name, self, default=default, is_audio=is_audio)
         setattr(self, name, ip)
         self._inports.append(ip)
         return ip
 
-    def _create_outport(self, name: str) -> OutPort:
-        op = OutPort(name, self)
+    def _create_outport(self, name: str, is_audio=False) -> OutPort:
+        op = OutPort(name, self, is_audio=is_audio)
         setattr(self, name, op)
         self._outports.append(op)
         return op
@@ -123,3 +126,27 @@ class Module:
                     return func(signal, **kwargs)
             return FuncModule
         return wrap
+
+    def to(self, target: Union['Module', Port]) -> Union['Module', Port]:
+        audio_outports = [op for op in self._outports if op.is_audio]
+        if len(audio_outports) != 1 and len(self._outports) != 1:
+            raise ValueError(
+                f'Module "{self}" has multiple output ports, cannot infer which to connect')
+        if len(audio_outports) == 1:
+            src_op = audio_outports[0]
+        else:
+            src_op = self._outports[0]
+
+        if isinstance(target, Port):
+            src_op.to(target)
+        else:
+            audio_inports = [ip for ip in target._inports if ip.is_audio]
+            if len(audio_inports) != 1 and len(target._inports) != 1:
+                raise ValueError(
+                    f'Target module "{target}" has multiple input ports, cannot infer which to connect')
+            if len(audio_inports) == 1:
+                dest_ip = audio_inports[0]
+            else:
+                dest_ip = target._inports[0]
+            src_op.to(dest_ip)
+        return target
