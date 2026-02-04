@@ -44,7 +44,8 @@ osc.to(env).to(gain).to(filter).to(mod.out)  # last one should be 'mod.out' sinc
 
 #### `play_keyboard.py`
 
-Play with your keyboard like a piano. Require `pygame`.
+Play with your keyboard like a piano. Sound streamed to your speaker in realtime.
+Require `pygame`, `sounddevice`.
 
 
 ## Acknowledge
