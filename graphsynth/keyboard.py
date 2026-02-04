@@ -44,5 +44,5 @@ class Keyboard:
         for sig in res:
             if sig.inited_t < 0.0:
                 sig.inited_t = t
-            sig.current_ts = np.arange(blocksize) / 44100.0 + t
+            sig.set_current(blocksize, t)
         return res

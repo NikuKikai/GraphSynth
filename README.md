@@ -5,6 +5,7 @@ A simple graph-style python framework for audio synthesizer.
 
 ```python
 import numpy as np
+from graphsynth import NoteSignal
 from graphsynth.modules import OSC, Gain, Container, Envelope, LowPass
 
 # Create modules
@@ -21,8 +22,9 @@ gain.out.to(filter.inp)
 filter.out.to(mod.out) # remember to connect to mod.out at the end.
 
 # Run
-ts = np.arange(44100)  / 44100.0  # time series of 1 second, at sample rate 44100
-result = mod(ts)  # run mod to get audio waveform
+signal = NoteSignal(freq='C4')
+signal.set_current(blocksize=44100)
+result = mod(signal)  # run mod to get audio waveform
 ```
 
 Connecting part can be simplified, if all modules have single audio inport/outport.
@@ -34,9 +36,10 @@ osc.to(env).to(gain).to(filter).to(mod.out)  # last one should be 'mod.out' sinc
 
 ## Usage
 
-- Module can contain multiple input ports and output ports.
-- Modules are connected through ports, using `to` method.
-    - If modules have single inport/outport, you can directly use Module's `to` method.
+- `Module` can contain multiple input ports and output ports.
+- `Module`s are connected through `InPort`/`OutPort`s, using `to` method.
+    - If `Module`s have single `InPort`/`OutPort`, you can directly use `Module`'s `to` method.
+    - Same `Module` object can be called with multiple `NoteSignal` simultaneously, since inner states are store in `NoteSignal` object separately.
 
 ## Examples
 

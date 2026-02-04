@@ -21,6 +21,10 @@ class NoteSignal:
     def local_released_t(self):
         return self.released_t_sys - self.inited_t_sys
 
+    def set_current(self, blocksize: int, t: float = None, sr: int = 44100):
+        t = time.time() if t is None else t
+        self.current_ts = np.arange(blocksize) / sr + t
+
 
 class Port:
     def __init__(self, name: str, parent: 'Module', is_audio=False):
