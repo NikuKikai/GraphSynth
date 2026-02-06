@@ -8,14 +8,14 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from graphsynth import Keyboard
-from graphsynth.modules import OSC, Gain, Container, Envelope, LowPass
+from graphsynth.modules import OSC, Gain, Container, ADSR, LowPass
 
 
 # ------ Define synth structure ------
 mod = Container()
 osc = OSC(OSC.WAVETYPE.SAWTOOTH)
 gain = Gain(gain=0.2)
-env = Envelope(attack=0.05, decay=0.1, sustain=0.5, release=0.5)
+env = ADSR(attack=0.05, decay=0.1, sustain=0.5, release=0.5)
 filter = LowPass(freq=300)
 
 # Complete annotations

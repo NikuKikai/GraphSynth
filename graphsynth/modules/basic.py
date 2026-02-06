@@ -38,6 +38,7 @@ class OSC(Module):
         SQUARE = "square"
         SAWTOOTH = "sawtooth"
         TRIANGLE = "triangle"
+        WHITENOISE = "whitenoise"
 
     def __init__(self, wavetype=WAVETYPE.SINE):
         super().__init__()
@@ -61,7 +62,7 @@ class OSC(Module):
         ts = signal.local_ts
         return (2 * np.abs(2 * (ts * signal.freq - np.floor(ts * signal.freq + 0.5))) - 1)
 
-    def _noise(self, signal: NoteSignal):
+    def _whitenoise(self, signal: NoteSignal):
         return np.random.uniform(-1.0, 1.0, size=signal.current_ts.shape)
 
     def _proc(self, signal: NoteSignal, **kwargs) -> dict:
@@ -70,12 +71,26 @@ class OSC(Module):
             self.WAVETYPE.SQUARE: self._square,
             self.WAVETYPE.SAWTOOTH: self._sawtooth,
             self.WAVETYPE.TRIANGLE: self._triangle,
+            self.WAVETYPE.WHITENOISE: self._whitenoise,
         }[self.wavetype]
         return {self.out.name: func(signal)}
 
 
-class Envelope(Module):
-    def __init__(self, attack=0.01, decay=0.1, sustain=0.7, release=0.2):
+class ADSR(Module):
+    """
+    ADSR Envelope Module. Since the default value of inp is 1.0, it can also be used as an envelope generator for arguments of other module.
+        - InPorts:
+            - inp: Input audio signal (default: 1.0)
+            - attack: Attack time in seconds (0.0 to inf)
+            - decay: Decay time in seconds (0.0 to inf)
+            - sustain: Sustain level (0.0 to 1.0)
+            - release: Release time in seconds. Negative means no release.
+            - scale: multiplier for the output
+        - OutPorts:
+            - out: Output audio signal
+    """
+
+    def __init__(self, attack=0.01, decay=0.1, sustain=0.7, release=0.2, scale=1.0):
         super().__init__()
         self._primitive = True
         self.inp = self._create_inport('inp', default=1.0, is_audio=True)
@@ -83,6 +98,7 @@ class Envelope(Module):
         self.decay = self._create_inport('decay', default=decay)
         self.sustain = self._create_inport('sustain', default=sustain)
         self.release = self._create_inport('release', default=release)
+        self.scale = self._create_inport('scale', default=scale)
         self.out = self._create_outport('out', is_audio=True)
 
     def _proc(
@@ -92,22 +108,41 @@ class Envelope(Module):
         attack: np.ndarray = 0.01,
         decay: np.ndarray = 0.1,
         sustain: np.ndarray = 0.7,
-        release: np.ndarray = 0.2
+        release: np.ndarray = 0.2,
+        scale: np.ndarray = 1.0
     ) -> dict:
         ts = np.clip(signal.local_ts, 0, None)
         rls = signal.local_released_t
 
+        use_release = release >= 0.0
+
+        attack = np.clip(attack, 0, None)
+        decay = np.clip(decay, 0, None)
+        sustain = np.clip(sustain, 0, 1.0)
+        release = np.clip(release, 0, None)
+
+        # k before release
         k = np.where(
-            (ts > rls) & (rls > 0),
-            (1 - np.clip(ts - rls, 0, release) / release) * sustain,
+            ts < attack,
+            ts / attack if attack > 0 else 1.0,
             np.where(
-                ts < attack,
-                ts / attack,
-                np.where(
-                    ts < (attack + decay),
-                    1 - (1 - sustain) * ((ts - attack) / decay),
-                    sustain
-                )
+                ts < (attack + decay),
+                1 - (1 - sustain) * ((ts - attack) / decay) if decay > 0 else sustain,
+                sustain
             )
         )
-        return {'out': inp * k}
+
+        # k after release
+        if use_release:
+            k = np.where(
+                (ts > rls) & (rls > 0),
+                (1 - np.clip(ts - rls, 0, release) / release) * sustain if release > 0 else 0.0,
+                k
+            )
+
+        # print("ADSR k max:", np.max(k) * scale)
+        return {'out': inp * k * scale}
+
+    @classmethod
+    def DS(cls, decay=0.1, sustain=0.7, scale=1.0):
+        return cls(attack=0.0, decay=decay, sustain=sustain, release=-1, scale=scale)
