@@ -76,7 +76,7 @@ class OSC(Module):
         return {self.out.name: func(signal)}
 
 
-class ADSR(Module):
+class ADSHR(Module):
     """
     ADSR Envelope Module. Since the default value of inp is 1.0, it can also be used as an envelope generator for arguments of other module.
         - InPorts:
@@ -90,13 +90,14 @@ class ADSR(Module):
             - out: Output audio signal
     """
 
-    def __init__(self, attack=0.01, decay=0.1, sustain=0.7, release=0.2, scale=1.0):
+    def __init__(self, attack=0.01, decay=0.1, sustain=0.7, hold=0.0, release=0.2, scale=1.0):
         super().__init__()
         self._primitive = True
         self.inp = self._create_inport('inp', default=1.0, is_audio=True)
         self.attack = self._create_inport('attack', default=attack)
         self.decay = self._create_inport('decay', default=decay)
         self.sustain = self._create_inport('sustain', default=sustain)
+        self.hold = self._create_inport('hold', default=hold)
         self.release = self._create_inport('release', default=release)
         self.scale = self._create_inport('scale', default=scale)
         self.out = self._create_outport('out', is_audio=True)
@@ -108,6 +109,7 @@ class ADSR(Module):
         attack: np.ndarray = 0.01,
         decay: np.ndarray = 0.1,
         sustain: np.ndarray = 0.7,
+        hold: np.ndarray = 0.0,
         release: np.ndarray = 0.2,
         scale: np.ndarray = 1.0
     ) -> dict:
@@ -119,6 +121,7 @@ class ADSR(Module):
         attack = np.clip(attack, 0, None)
         decay = np.clip(decay, 0, None)
         sustain = np.clip(sustain, 0, 1.0)
+        hold = np.clip(hold, 0, None)
         release = np.clip(release, 0, None)
 
         # k before release
@@ -136,7 +139,11 @@ class ADSR(Module):
         if use_release:
             k = np.where(
                 (ts > rls) & (rls > 0),
-                (1 - np.clip(ts - rls, 0, release) / release) * sustain if release > 0 else 0.0,
+                np.where(
+                    ts > rls + hold,
+                    (1 - np.clip(ts - rls, 0, release) / release) * sustain if release > 0 else 0.0,
+                    sustain
+                ),
                 k
             )
 
